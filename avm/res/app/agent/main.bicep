@@ -4,7 +4,6 @@ metadata description = 'This module deploys a Microsoft.App/agents resource.'
 import {
   diagnosticSettingFullType
   lockType
-  managedIdentityAllType
   roleAssignmentType
 } from 'br/public:avm/utl/types/avm-common-types:0.6.1'
 
@@ -16,8 +15,8 @@ param name string
 @description('Optional. Location for all resources.')
 param location string = resourceGroup().location
 
-@description('Required. Agent identity configuration for accessing resources.')
-param agentIdentity agentIdentityType
+@description('Optional. Legacy agent identity configuration. Not used by the current Microsoft.App/agents preview API.')
+param agentIdentity agentIdentityType?
 
 @description('Optional. Configuration for actions the agent can perform.')
 param actionConfiguration actionConfigurationType?
@@ -34,6 +33,9 @@ param incidentManagementConfiguration incidentManagementConfigurationType?
 @description('Optional. Knowledge graph configuration for the agent.')
 param knowledgeGraphConfiguration knowledgeGraphConfigurationType?
 
+@description('Optional. MCP server configuration for the agent.')
+param mcpServers array?
+
 @description('Optional. Log configuration for the agent.')
 param logConfiguration logConfigurationType?
 
@@ -47,8 +49,8 @@ param upgradeChannel string = 'Stable'
 @description('Optional. Tags of the resource.')
 param tags tagsType?
 
-@description('Optional. The managed identity definition for this resource.')
-param managedIdentities managedIdentityAllType?
+@description('Required. User-assigned managed identities for this resource. Azure SRE Agent requires a user-assigned managed identity for resource operations and also creates an internal system-assigned identity.')
+param managedIdentities managedIdentityUserAssignedType
 
 @description('Optional. Array of role assignments to create.')
 param roleAssignments roleAssignmentType[]?
@@ -63,17 +65,15 @@ param lock lockType?
 param enableTelemetry bool = true
 
 var formattedUserAssignedIdentities = reduce(
-  map((managedIdentities.?userAssignedResourceIds ?? []), id => { '${id}': {} }),
+  map(managedIdentities.userAssignedResourceIds, id => { '${id}': {} }),
   {},
   (current, next) => union(current, next)
 )
 
-var identity = !empty(managedIdentities) ? {
-  type: (managedIdentities.?systemAssigned ?? false)
-    ? (!empty(formattedUserAssignedIdentities) ? 'SystemAssigned,UserAssigned' : 'SystemAssigned')
-    : (!empty(formattedUserAssignedIdentities) ? 'UserAssigned' : 'None')
-  userAssignedIdentities: !empty(formattedUserAssignedIdentities) ? formattedUserAssignedIdentities : null
-} : null
+var identity = {
+  type: 'SystemAssigned, UserAssigned'
+  userAssignedIdentities: formattedUserAssignedIdentities
+}
 
 var formattedRoleAssignments = [
   for roleAssignment in (roleAssignments ?? []): union(roleAssignment, {
@@ -85,14 +85,15 @@ var formattedRoleAssignments = [
 
 var properties = union(
   {
-    agentIdentity: agentIdentity
     upgradeChannel: upgradeChannel
   },
+  !empty(agentIdentity) ? { agentIdentity: agentIdentity } : {},
   !empty(actionConfiguration) ? { actionConfiguration: actionConfiguration } : {},
   !empty(agentSpaceId) ? { agentSpaceId: agentSpaceId } : {},
   !empty(defaultModel) ? { defaultModel: defaultModel } : {},
   !empty(incidentManagementConfiguration) ? { incidentManagementConfiguration: incidentManagementConfiguration } : {},
   !empty(knowledgeGraphConfiguration) ? { knowledgeGraphConfiguration: knowledgeGraphConfiguration } : {},
+  !empty(mcpServers) ? { mcpServers: mcpServers } : {},
   !empty(logConfiguration) ? { logConfiguration: logConfiguration } : {}
 )
 
@@ -118,11 +119,11 @@ resource avmTelemetry 'Microsoft.Resources/deployments@2024-03-01' = if (enableT
   }
 }
 
-resource agent 'Microsoft.App/agents@2026-01-01' = {
+resource agent 'Microsoft.App/agents@2025-05-01-preview' = {
   name: name
   location: location
-  identity: identity
-  tags: tags
+  identity: any(identity)
+  tags: any(tags)
   properties: properties
 }
 
@@ -201,8 +202,8 @@ output resourceGroupName string = resourceGroup().name
 @description('The location the resource was deployed into.')
 output location string = agent.location
 
-@description('The principal ID of the system-assigned managed identity.')
-output systemAssignedMIPrincipalId string? = agent.?identity.?principalId
+@description('The resource IDs of the user-assigned managed identities attached to the agent.')
+output userAssignedMIResourceIds string[] = map(items(agent.?identity.?userAssignedIdentities ?? {}), identityItem => identityItem.key)
 
 @export()
 @description('Agent action execution configuration.')
@@ -214,7 +215,7 @@ type actionConfigurationType = {
   identity: string?
 
   @description('Optional. The execution mode of the action.')
-  mode: ('Autonomous' | 'ReadOnly' | 'Review')?
+  mode: ('autonomous' | 'readOnly' | 'review' | 'Autonomous' | 'ReadOnly' | 'Review')?
 }
 
 @export()
@@ -229,6 +230,9 @@ type agentIdentityType = {
 type applicationInsightsConfigurationType = {
   @description('Optional. The Application ID for the Application Insights resource.')
   appId: string?
+
+  @description('Optional. The resource ID for the Application Insights resource.')
+  applicationInsightsResourceId: string?
 
   @secure()
   @description('Optional. The connection string for the Application Insights resource.')
@@ -287,4 +291,12 @@ type logConfigurationType = {
 type tagsType = {
   @description('Optional. A tag name and value pair.')
   *: string
+}
+
+@export()
+@description('User-assigned managed identities for Azure SRE Agent.')
+type managedIdentityUserAssignedType = {
+  @minLength(1)
+  @description('Required. The user-assigned managed identity resource IDs to assign to the agent.')
+  userAssignedResourceIds: string[]
 }

@@ -3,9 +3,6 @@ targetScope = 'resourceGroup'
 metadata name = 'Using all parameters'
 metadata description = 'This instance deploys the module with all optional parameters exercised.'
 
-@description('Required. Initial sponsor group ID for the agent identity.')
-param initialSponsorGroupId string
-
 @description('Required. Principal ID to assign Reader on the agent.')
 param readerPrincipalId string
 
@@ -23,16 +20,19 @@ param incidentConnectionKey string = ''
 @description('Optional. Token used to make the resource name unique.')
 param nameToken string = uniqueString(resourceGroup().id, deployment().name)
 
+resource agentIdentity 'Microsoft.ManagedIdentity/userAssignedIdentities@2023-01-31' = {
+  name: take('id-agent-max-${nameToken}', 128)
+  location: resourceGroup().location
+}
+
 module testDeployment '../../../main.bicep' = {
   name: 'agent-max-${substring(nameToken, 0, 6)}'
   params: {
     name: take('am${nameToken}', 32)
-    agentIdentity: {
-      initialSponsorGroupId: initialSponsorGroupId
-    }
     actionConfiguration: {
       accessLevel: 'Low'
-      mode: 'Review'
+      identity: agentIdentity.id
+      mode: 'review'
     }
     agentSpaceId: 'space-${nameToken}'
     defaultModel: {
@@ -46,6 +46,7 @@ module testDeployment '../../../main.bicep' = {
       type: 'AzureMonitor'
     }
     knowledgeGraphConfiguration: {
+      identity: agentIdentity.id
       managedResources: [
         resourceGroup().id
       ]
@@ -57,7 +58,9 @@ module testDeployment '../../../main.bicep' = {
       }
     }
     managedIdentities: {
-      systemAssigned: true
+      userAssignedResourceIds: [
+        agentIdentity.id
+      ]
     }
     roleAssignments: [
       {
