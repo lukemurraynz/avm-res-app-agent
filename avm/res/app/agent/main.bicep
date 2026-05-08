@@ -21,11 +21,35 @@ param agentIdentity agentIdentityType?
 @description('Optional. Configuration for actions the agent can perform.')
 param actionConfiguration actionConfigurationType?
 
+@allowed([
+  'High'
+  'Low'
+])
+@description('Optional. First-class action access level. Ignored when actionConfiguration is supplied.')
+param actionAccessLevel string?
+
+@description('Optional. First-class managed identity resource ID used by actions. Ignored when actionConfiguration is supplied.')
+param actionIdentity string?
+
+@allowed([
+  'autonomous'
+  'readOnly'
+  'review'
+  'Autonomous'
+  'ReadOnly'
+  'Review'
+])
+@description('Optional. First-class action execution mode. Ignored when actionConfiguration is supplied.')
+param actionMode string?
+
 @description('Optional. The agent space ID referenced by the agent.')
 param agentSpaceId string?
 
 @description('Optional. Default AI model configuration for the agent.')
 param defaultModel defaultModelType?
+
+@description('Optional. Experimental feature flags for the agent.')
+param experimentalSettings object?
 
 @description('Optional. Incident management configuration.')
 param incidentManagementConfiguration incidentManagementConfigurationType?
@@ -35,6 +59,9 @@ param knowledgeGraphConfiguration knowledgeGraphConfigurationType?
 
 @description('Optional. MCP server configuration for the agent.')
 param mcpServers array?
+
+@description('Optional. Connector child resources to deploy under the agent. Use for ARM-supported connectors such as AppInsights, LogAnalytics, MonitorClient, and MCP endpoints.')
+param connectors connectorType[]?
 
 @description('Optional. Log configuration for the agent.')
 param logConfiguration logConfigurationType?
@@ -75,6 +102,14 @@ var identity = {
   userAssignedIdentities: formattedUserAssignedIdentities
 }
 
+var hasFirstClassActionConfiguration = !empty(actionAccessLevel) || !empty(actionIdentity) || !empty(actionMode)
+var actionConfigurationFromFirstClass = hasFirstClassActionConfiguration ? union(
+  !empty(actionAccessLevel) ? { accessLevel: actionAccessLevel } : {},
+  !empty(actionIdentity) ? { identity: actionIdentity } : {},
+  !empty(actionMode) ? { mode: actionMode } : {}
+) : {}
+var effectiveActionConfiguration = !empty(actionConfiguration) ? actionConfiguration : actionConfigurationFromFirstClass
+
 var formattedRoleAssignments = [
   for roleAssignment in (roleAssignments ?? []): union(roleAssignment, {
     roleDefinitionId: contains(roleAssignment.roleDefinitionIdOrName, '/providers/Microsoft.Authorization/roleDefinitions/')
@@ -88,9 +123,10 @@ var properties = union(
     upgradeChannel: upgradeChannel
   },
   !empty(agentIdentity) ? { agentIdentity: agentIdentity } : {},
-  !empty(actionConfiguration) ? { actionConfiguration: actionConfiguration } : {},
+  !empty(effectiveActionConfiguration) ? { actionConfiguration: effectiveActionConfiguration } : {},
   !empty(agentSpaceId) ? { agentSpaceId: agentSpaceId } : {},
   !empty(defaultModel) ? { defaultModel: defaultModel } : {},
+  !empty(experimentalSettings) ? { experimentalSettings: experimentalSettings } : {},
   !empty(incidentManagementConfiguration) ? { incidentManagementConfiguration: incidentManagementConfiguration } : {},
   !empty(knowledgeGraphConfiguration) ? { knowledgeGraphConfiguration: knowledgeGraphConfiguration } : {},
   !empty(mcpServers) ? { mcpServers: mcpServers } : {},
@@ -126,6 +162,20 @@ resource agent 'Microsoft.App/agents@2025-05-01-preview' = {
   tags: any(tags)
   properties: properties
 }
+
+#disable-next-line BCP081
+resource agentConnectors 'Microsoft.App/agents/connectors@2025-05-01-preview' = [
+  for connector in (connectors ?? []): {
+    parent: agent
+    name: connector.name
+    properties: {
+      dataConnectorType: connector.dataConnectorType
+      dataSource: connector.dataSource
+      extendedProperties: connector.?extendedProperties
+      identity: connector.?identity
+    }
+  }
+]
 
 resource agentLock 'Microsoft.Authorization/locks@2020-05-01' = if (!empty(lock ?? {}) && lock.?kind != 'None') {
   name: lock.?name ?? 'lock-${name}'
@@ -205,6 +255,17 @@ output location string = agent.location
 @description('The resource IDs of the user-assigned managed identities attached to the agent.')
 output userAssignedMIResourceIds string[] = map(items(agent.?identity.?userAssignedIdentities ?? {}), identityItem => identityItem.key)
 
+@description('The principal ID of the system-assigned managed identity attached to the agent.')
+output systemAssignedMIPrincipalId string = agent.identity.principalId
+
+@description('The Azure SRE Agent endpoint.')
+output agentEndpoint string = agent.properties.agentEndpoint
+
+@description('The resource IDs of the deployed connector child resources.')
+output connectorResourceIds string[] = [
+  for connector in (connectors ?? []): resourceId('Microsoft.App/agents/connectors', name, connector.name)
+]
+
 @export()
 @description('Agent action execution configuration.')
 type actionConfigurationType = {
@@ -237,6 +298,54 @@ type applicationInsightsConfigurationType = {
   @secure()
   @description('Optional. The connection string for the Application Insights resource.')
   connectionString: string?
+}
+
+@export()
+@description('Agent connector child resource configuration.')
+type connectorType = {
+  @description('Required. Connector child resource name.')
+  name: string
+
+  @description('Required. Connector type, for example AppInsights, LogAnalytics, MonitorClient, or Mcp.')
+  dataConnectorType: string
+
+  @description('Required. Connector data source. Some connector types use an Azure resource ID; others use a logical source value.')
+  dataSource: string
+
+  @description('Optional. Connector-specific extended properties.')
+  extendedProperties: object?
+
+  @description('Optional. Connector identity setting. Built-in Azure connectors often use system; external MCP connectors can use an empty string depending on provider behavior.')
+  identity: string?
+}
+
+@export()
+@description('MCP HTTP connector extended properties helper. Use inside connectorType.extendedProperties for MCP connectors that need explicit tool visibility.')
+type mcpConnectorExtendedPropertiesType = {
+  @description('Required. MCP transport type.')
+  type: 'http'
+
+  @description('Required. MCP server endpoint.')
+  endpoint: string
+
+  @description('Optional. Authentication type used by the connector.')
+  authType: string?
+
+  @description('Optional. Tool names visible to the meta-agent. Use this when connector health alone is not enough to activate tools for the agent.')
+  toolsVisibleToMetaAgent: string[]?
+}
+
+@export()
+@description('Azure resource connector extended properties helper. Use inside connectorType.extendedProperties for ARM-backed connectors such as Application Insights and Log Analytics.')
+type azureResourceConnectorExtendedPropertiesType = {
+  @description('Required. Azure resource ID backing the connector.')
+  armResourceId: string
+
+  @description('Optional. Portal display metadata for the backing resource.')
+  resource: {
+    @description('Optional. Backing resource name.')
+    name: string?
+  }?
 }
 
 @export()

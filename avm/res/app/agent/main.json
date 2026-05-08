@@ -6,7 +6,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.42.1.51946",
-      "templateHash": "6694887164737665427"
+      "templateHash": "15624710022580540977"
     },
     "name": "App Agent",
     "description": "This module deploys a Microsoft.App/agents resource."
@@ -38,7 +38,10 @@
           "allowedValues": [
             "Autonomous",
             "ReadOnly",
-            "Review"
+            "Review",
+            "autonomous",
+            "readOnly",
+            "review"
           ],
           "nullable": true,
           "metadata": {
@@ -76,6 +79,13 @@
             "description": "Optional. The Application ID for the Application Insights resource."
           }
         },
+        "applicationInsightsResourceId": {
+          "type": "string",
+          "nullable": true,
+          "metadata": {
+            "description": "Optional. The resource ID for the Application Insights resource."
+          }
+        },
         "connectionString": {
           "type": "securestring",
           "nullable": true,
@@ -87,6 +97,47 @@
       "metadata": {
         "__bicep_export!": true,
         "description": "Application Insights configuration for agent logs."
+      }
+    },
+    "connectorType": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "metadata": {
+            "description": "Required. Connector child resource name."
+          }
+        },
+        "dataConnectorType": {
+          "type": "string",
+          "metadata": {
+            "description": "Required. Connector type, for example AppInsights, LogAnalytics, MonitorClient, or Mcp."
+          }
+        },
+        "dataSource": {
+          "type": "string",
+          "metadata": {
+            "description": "Required. Connector data source. Some connector types use an Azure resource ID; others use a logical source value."
+          }
+        },
+        "extendedProperties": {
+          "type": "object",
+          "nullable": true,
+          "metadata": {
+            "description": "Optional. Connector-specific extended properties."
+          }
+        },
+        "identity": {
+          "type": "string",
+          "nullable": true,
+          "metadata": {
+            "description": "Optional. Connector identity setting. Built-in Azure connectors often use system; external MCP connectors can use an empty string depending on provider behavior."
+          }
+        }
+      },
+      "metadata": {
+        "__bicep_export!": true,
+        "description": "Agent connector child resource configuration."
       }
     },
     "defaultModelType": {
@@ -210,6 +261,25 @@
       "metadata": {
         "__bicep_export!": true,
         "description": "Tags to apply to the resource."
+      }
+    },
+    "managedIdentityUserAssignedType": {
+      "type": "object",
+      "properties": {
+        "userAssignedResourceIds": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "minLength": 1,
+          "metadata": {
+            "description": "Required. The user-assigned managed identity resource IDs to assign to the agent."
+          }
+        }
+      },
+      "metadata": {
+        "__bicep_export!": true,
+        "description": "User-assigned managed identities for Azure SRE Agent."
       }
     },
     "diagnosticSettingFullType": {
@@ -371,34 +441,6 @@
         }
       }
     },
-    "managedIdentityAllType": {
-      "type": "object",
-      "properties": {
-        "systemAssigned": {
-          "type": "bool",
-          "nullable": true,
-          "metadata": {
-            "description": "Optional. Enables system assigned managed identity on the resource."
-          }
-        },
-        "userAssignedResourceIds": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          },
-          "nullable": true,
-          "metadata": {
-            "description": "Optional. The resource ID(s) to assign to the resource. Required if a user assigned identity is used for encryption."
-          }
-        }
-      },
-      "metadata": {
-        "description": "An AVM-aligned type for a managed identity configuration. To be used if both a system-assigned & user-assigned identities are supported by the resource provider.",
-        "__bicep_imported_from!": {
-          "sourceTemplate": "br:mcr.microsoft.com/bicep/avm/utl/types/avm-common-types:0.6.1"
-        }
-      }
-    },
     "roleAssignmentType": {
       "type": "object",
       "properties": {
@@ -493,8 +535,9 @@
     },
     "agentIdentity": {
       "$ref": "#/definitions/agentIdentityType",
+      "nullable": true,
       "metadata": {
-        "description": "Required. Agent identity configuration for accessing resources."
+        "description": "Optional. Legacy agent identity configuration. Not used by the current Microsoft.App/agents preview API."
       }
     },
     "actionConfiguration": {
@@ -518,6 +561,13 @@
         "description": "Optional. Default AI model configuration for the agent."
       }
     },
+    "experimentalSettings": {
+      "type": "object",
+      "nullable": true,
+      "metadata": {
+        "description": "Optional. Experimental feature flags for the agent."
+      }
+    },
     "incidentManagementConfiguration": {
       "$ref": "#/definitions/incidentManagementConfigurationType",
       "nullable": true,
@@ -530,6 +580,23 @@
       "nullable": true,
       "metadata": {
         "description": "Optional. Knowledge graph configuration for the agent."
+      }
+    },
+    "mcpServers": {
+      "type": "array",
+      "nullable": true,
+      "metadata": {
+        "description": "Optional. MCP server configuration for the agent."
+      }
+    },
+    "connectors": {
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/connectorType"
+      },
+      "nullable": true,
+      "metadata": {
+        "description": "Optional. Connector child resources to deploy under the agent. Use for ARM-supported connectors such as AppInsights, LogAnalytics, MonitorClient, and MCP endpoints."
       }
     },
     "logConfiguration": {
@@ -558,10 +625,9 @@
       }
     },
     "managedIdentities": {
-      "$ref": "#/definitions/managedIdentityAllType",
-      "nullable": true,
+      "$ref": "#/definitions/managedIdentityUserAssignedType",
       "metadata": {
-        "description": "Optional. The managed identity definition for this resource."
+        "description": "Required. User-assigned managed identities for this resource. Azure SRE Agent requires a user-assigned managed identity for resource operations and also creates an internal system-assigned identity."
       }
     },
     "roleAssignments": {
@@ -607,9 +673,12 @@
         "input": "[union(coalesce(parameters('roleAssignments'), createArray())[copyIndex('formattedRoleAssignments')], createObject('roleDefinitionId', if(contains(coalesce(parameters('roleAssignments'), createArray())[copyIndex('formattedRoleAssignments')].roleDefinitionIdOrName, '/providers/Microsoft.Authorization/roleDefinitions/'), coalesce(parameters('roleAssignments'), createArray())[copyIndex('formattedRoleAssignments')].roleDefinitionIdOrName, if(contains(coalesce(parameters('roleAssignments'), createArray())[copyIndex('formattedRoleAssignments')].roleDefinitionIdOrName, '-'), subscriptionResourceId('Microsoft.Authorization/roleDefinitions', coalesce(parameters('roleAssignments'), createArray())[copyIndex('formattedRoleAssignments')].roleDefinitionIdOrName), roleDefinitions(coalesce(parameters('roleAssignments'), createArray())[copyIndex('formattedRoleAssignments')].roleDefinitionIdOrName).id))))]"
       }
     ],
-    "formattedUserAssignedIdentities": "[reduce(map(coalesce(tryGet(parameters('managedIdentities'), 'userAssignedResourceIds'), createArray()), lambda('id', createObject(format('{0}', lambdaVariables('id')), createObject()))), createObject(), lambda('current', 'next', union(lambdaVariables('current'), lambdaVariables('next'))))]",
-    "identity": "[if(not(empty(parameters('managedIdentities'))), createObject('type', if(coalesce(tryGet(parameters('managedIdentities'), 'systemAssigned'), false()), if(not(empty(variables('formattedUserAssignedIdentities'))), 'SystemAssigned,UserAssigned', 'SystemAssigned'), if(not(empty(variables('formattedUserAssignedIdentities'))), 'UserAssigned', 'None')), 'userAssignedIdentities', if(not(empty(variables('formattedUserAssignedIdentities'))), variables('formattedUserAssignedIdentities'), null())), null())]",
-    "properties": "[union(createObject('agentIdentity', parameters('agentIdentity'), 'upgradeChannel', parameters('upgradeChannel')), if(not(empty(parameters('actionConfiguration'))), createObject('actionConfiguration', parameters('actionConfiguration')), createObject()), if(not(empty(parameters('agentSpaceId'))), createObject('agentSpaceId', parameters('agentSpaceId')), createObject()), if(not(empty(parameters('defaultModel'))), createObject('defaultModel', parameters('defaultModel')), createObject()), if(not(empty(parameters('incidentManagementConfiguration'))), createObject('incidentManagementConfiguration', parameters('incidentManagementConfiguration')), createObject()), if(not(empty(parameters('knowledgeGraphConfiguration'))), createObject('knowledgeGraphConfiguration', parameters('knowledgeGraphConfiguration')), createObject()), if(not(empty(parameters('logConfiguration'))), createObject('logConfiguration', parameters('logConfiguration')), createObject()))]"
+    "formattedUserAssignedIdentities": "[reduce(map(parameters('managedIdentities').userAssignedResourceIds, lambda('id', createObject(format('{0}', lambdaVariables('id')), createObject()))), createObject(), lambda('current', 'next', union(lambdaVariables('current'), lambdaVariables('next'))))]",
+    "identity": {
+      "type": "SystemAssigned, UserAssigned",
+      "userAssignedIdentities": "[variables('formattedUserAssignedIdentities')]"
+    },
+    "properties": "[union(createObject('upgradeChannel', parameters('upgradeChannel')), if(not(empty(parameters('agentIdentity'))), createObject('agentIdentity', parameters('agentIdentity')), createObject()), if(not(empty(parameters('actionConfiguration'))), createObject('actionConfiguration', parameters('actionConfiguration')), createObject()), if(not(empty(parameters('agentSpaceId'))), createObject('agentSpaceId', parameters('agentSpaceId')), createObject()), if(not(empty(parameters('defaultModel'))), createObject('defaultModel', parameters('defaultModel')), createObject()), if(not(empty(parameters('experimentalSettings'))), createObject('experimentalSettings', parameters('experimentalSettings')), createObject()), if(not(empty(parameters('incidentManagementConfiguration'))), createObject('incidentManagementConfiguration', parameters('incidentManagementConfiguration')), createObject()), if(not(empty(parameters('knowledgeGraphConfiguration'))), createObject('knowledgeGraphConfiguration', parameters('knowledgeGraphConfiguration')), createObject()), if(not(empty(parameters('mcpServers'))), createObject('mcpServers', parameters('mcpServers')), createObject()), if(not(empty(parameters('logConfiguration'))), createObject('logConfiguration', parameters('logConfiguration')), createObject()))]"
   },
   "resources": {
     "avmTelemetry": {
@@ -634,12 +703,30 @@
     },
     "agent": {
       "type": "Microsoft.App/agents",
-      "apiVersion": "2026-01-01",
+      "apiVersion": "2025-05-01-preview",
       "name": "[parameters('name')]",
       "location": "[parameters('location')]",
       "identity": "[variables('identity')]",
       "tags": "[parameters('tags')]",
       "properties": "[variables('properties')]"
+    },
+    "agentConnectors": {
+      "copy": {
+        "name": "agentConnectors",
+        "count": "[length(coalesce(parameters('connectors'), createArray()))]"
+      },
+      "type": "Microsoft.App/agents/connectors",
+      "apiVersion": "2025-05-01-preview",
+      "name": "[format('{0}/{1}', parameters('name'), coalesce(parameters('connectors'), createArray())[copyIndex()].name)]",
+      "properties": {
+        "dataConnectorType": "[coalesce(parameters('connectors'), createArray())[copyIndex()].dataConnectorType]",
+        "dataSource": "[coalesce(parameters('connectors'), createArray())[copyIndex()].dataSource]",
+        "extendedProperties": "[tryGet(coalesce(parameters('connectors'), createArray())[copyIndex()], 'extendedProperties')]",
+        "identity": "[tryGet(coalesce(parameters('connectors'), createArray())[copyIndex()], 'identity')]"
+      },
+      "dependsOn": [
+        "agent"
+      ]
     },
     "agentLock": {
       "condition": "[and(not(empty(coalesce(parameters('lock'), createObject()))), not(equals(tryGet(parameters('lock'), 'kind'), 'None')))]",
@@ -746,15 +833,41 @@
       "metadata": {
         "description": "The location the resource was deployed into."
       },
-      "value": "[reference('agent', '2026-01-01', 'full').location]"
+      "value": "[reference('agent', '2025-05-01-preview', 'full').location]"
+    },
+    "userAssignedMIResourceIds": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "metadata": {
+        "description": "The resource IDs of the user-assigned managed identities attached to the agent."
+      },
+      "value": "[map(items(coalesce(tryGet(tryGet(reference('agent', '2025-05-01-preview', 'full'), 'identity'), 'userAssignedIdentities'), createObject())), lambda('identityItem', lambdaVariables('identityItem').key))]"
     },
     "systemAssignedMIPrincipalId": {
       "type": "string",
-      "nullable": true,
       "metadata": {
-        "description": "The principal ID of the system-assigned managed identity."
+        "description": "The principal ID of the system-assigned managed identity attached to the agent."
       },
-      "value": "[tryGet(tryGet(reference('agent', '2026-01-01', 'full'), 'identity'), 'principalId')]"
+      "value": "[reference('agent', '2025-05-01-preview', 'full').identity.principalId]"
+    },
+    "agentEndpoint": {
+      "type": "string",
+      "metadata": {
+        "description": "The Azure SRE Agent endpoint."
+      },
+      "value": "[reference('agent').agentEndpoint]"
+    },
+    "connectorResourceIds": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "metadata": {
+        "description": "The resource IDs of the deployed connector child resources."
+      },
+      "value": "[map(references('agentConnectors', 'full'), lambda('connector', lambdaVariables('connector').id))]"
     }
   }
 }
