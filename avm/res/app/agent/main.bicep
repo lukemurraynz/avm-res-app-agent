@@ -60,6 +60,8 @@ param knowledgeGraphConfiguration knowledgeGraphConfigurationType?
 @description('Optional. MCP server configuration for the agent.')
 param mcpServers array?
 
+// SECURITY WARNING: Do NOT include secrets or sensitive values (e.g., API keys, passwords) in connector extended properties directly in this parameter.
+// Use Azure Key Vault references and @secure() parameters to avoid exposing secrets in plain text in Bicep files or parameter files.
 @description('Optional. Connector child resources to deploy under the agent. Use for ARM-supported connectors such as AppInsights, LogAnalytics, MonitorClient, and MCP endpoints.')
 param connectors connectorType[]?
 
