@@ -11,8 +11,6 @@ The module deploys `Microsoft.App/agents` with support for user-assigned managed
 ## Module documentation
 
 - [Module README](./avm/res/app/agent/README.md)
-- [Operational guidance](./avm/res/app/agent/docs/operational-guidance.md)
-- [Documentation review notes](./avm/res/app/agent/docs/documentation-review-notes.md)
 - [Changelog](./avm/res/app/agent/CHANGELOG.md)
 
 ## Module status
